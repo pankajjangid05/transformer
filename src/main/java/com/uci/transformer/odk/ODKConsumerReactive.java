@@ -10,6 +10,8 @@ import com.uci.transformer.TransformerProvider;
 import com.uci.transformer.odk.services.SurveyService;
 import com.uci.utils.BotService;
 import com.uci.utils.bot.util.BotUtil;
+import com.uci.utils.dto.LogicID;
+import com.uci.utils.dto.Result;
 import com.uci.utils.service.UserService;
 import com.uci.transformer.odk.entity.Assessment;
 import com.uci.transformer.odk.entity.GupshupMessageEntity;
@@ -204,7 +206,7 @@ public class ODKConsumerReactive extends TransformerProvider {
     
     @Override
     public Mono<XMessage> transform(XMessage xMessage) throws Exception {
-    	XMessage[] finalXMsg = new XMessage[1];
+        XMessage[] finalXMsg = new XMessage[1];
         ArrayList<Transformer> transformers = xMessage.getTransformers();
         Transformer transformer = transformers.get(0);
 
@@ -378,58 +380,69 @@ public class ODKConsumerReactive extends TransformerProvider {
                          **/
                         if (response[0].currentIndex.contains("eof__") && response[0].currentIndex.contains("doubtnut")) {
                             String nextBotID = mm.getNextBotID(response[0].currentIndex);
-                            return botService.getBotNodeFromId(nextBotID).map(new Function<JsonNode, Mono<XMessage>>() {
+                            return botService.getBotNodeFromId(nextBotID).map(new Function<Result, Mono<XMessage>>() {
                                 @Override
-                                public Mono<XMessage> apply(JsonNode data) {
+                                public Mono<XMessage> apply(Result result) {
 //                                    JsonNode data = jsonNode.get("data");
                                     ArrayList<Transformer> transformers = new ArrayList<Transformer>();
-                                    ArrayList transformerList = (ArrayList) data.findValues("transformers");
 
-                                    transformerList.forEach(transformerTmp -> {
-                                        JsonNode transformerNode = (JsonNode) transformerTmp;
-                                        int i = 0;
-                                        while (transformerNode.get(i) != null) {
-                                            JsonNode transformer = transformerNode.get(i);
-                                            log.info("transformer:" + transformer);
+                                    if(result != null && result.getLogicIDs() != null && result.getLogicIDs().size() > 0){
+                                        for(LogicID logicID : result.getLogicIDs()){
+                                            if (logicID.getTransformers() != null && logicID.getTransformers().size() > 0) {
+                                                ArrayList transformerList =  logicID.getTransformers();
 
-                                            HashMap<String, String> metaData = new HashMap<String, String>();
-                                            if (data.findValue("ownerID").asText().equals("null")) {
-                                                metaData.put("botOwnerID", "");
-                                            } else {
-                                                metaData.put("botOwnerID", data.findValue("ownerID").asText());
+                                                transformerList.forEach(transformerTmp -> {
+                                                    com.uci.utils.dto.Transformer transformerNode = (com.uci.utils.dto.Transformer) transformerTmp;
+
+                                                    int i = 0;
+                                                    if (transformerNode != null) {
+//                                                        JsonNode transformer = transformerNode.get(i);
+                                                        log.info("transformer:" + transformerNode);
+
+                                                        HashMap<String, String> metaData = new HashMap<String, String>();
+                                                        if (result.getOwnerID() == null) {
+                                                            metaData.put("botOwnerID", "");
+                                                        } else {
+                                                            metaData.put("botOwnerID", result.getOwnerID());
+                                                        }
+                                                        if (result.getOwnerOrgID() == null) {
+                                                            metaData.put("botOwnerOrgID", "");
+                                                        } else {
+                                                            metaData.put("botOwnerOrgID", result.getOwnerOrgID());
+                                                        }
+                                                        metaData.put("startingMessage", result.getStartingMessage());
+                                                        metaData.put("type", "generic");
+
+                                                        Transformer transf = new Transformer();
+                                                        transf.setId(transformerNode.getId());
+                                                        transf.setMetaData(metaData);
+                                                        transformers.add(transf);
+                                                        i++;
+                                                    }
+                                                });
+                                                xMessage.setTransformers(transformers);
+                                                XMessagePayload payload = xMessage.getPayload();
+                                                payload.setText(result.getStartingMessage());
+                                                xMessage.setPayload(payload);
+                                                xMessage.setApp(result.getName());
+                                                if (result.getOwnerID() != null && !result.getOwnerID().isEmpty()) {
+                                                    xMessage.setOwnerId(result.getOwnerID());
+                                                } else {
+                                                    xMessage.setOwnerId("");
+                                                }
+                                                if (result.getOwnerOrgID() != null && !result.getOwnerOrgID().isEmpty()) {
+                                                    xMessage.setOwnerOrgId(result.getOwnerOrgID());
+                                                } else {
+                                                    xMessage.setOwnerOrgId("");
+                                                }
+                                                xMessage.setBotId(UUID.fromString(result.getId()));
+                                                xMessage.setSessionId(UUID.randomUUID());
+                                                return Mono.just(xMessage);
                                             }
-                                            if (data.findValue("ownerOrgID").asText().equals("null")) {
-                                                metaData.put("botOwnerOrgID", "");
-                                            } else {
-                                                metaData.put("botOwnerOrgID", data.findValue("ownerOrgID").asText());
-                                            }
-                                            metaData.put("startingMessage", data.findValue("startingMessage").asText());
-                                            metaData.put("type", "generic");
-
-                                            Transformer transf = new Transformer();
-                                            transf.setId(transformer.get("id").asText());
-                                            transf.setMetaData(metaData);
-                                            transformers.add(transf);
-                                            i++;
                                         }
-                                    });
-                                    xMessage.setTransformers(transformers);
-                                    XMessagePayload payload = xMessage.getPayload();
-                                    payload.setText(data.path("startingMessage").asText());
-                                    xMessage.setPayload(payload);
-                                    xMessage.setApp(data.path("name").asText());
-                                    if (data.findValue("ownerID") != null && !data.findValue("ownerID").asText().equals("null")) {
-                                        xMessage.setOwnerId(data.findValue("ownerID").asText());
-                                    } else {
-                                        xMessage.setOwnerId("");
+                                    } else{
+                                        log.error("Result null found : " + result);
                                     }
-                                    if (data.findValue("ownerOrgID") != null && !data.findValue("ownerOrgID").asText().equals("null")) {
-                                        xMessage.setOwnerOrgId(data.findValue("ownerOrgID").asText());
-                                    } else {
-                                        xMessage.setOwnerOrgId("");
-                                    }
-                                    xMessage.setBotId(UUID.fromString(data.path("id").asText()));
-                                    xMessage.setSessionId(UUID.randomUUID());
                                     return Mono.just(xMessage);
                                 }
                             });
@@ -492,8 +505,8 @@ public class ODKConsumerReactive extends TransformerProvider {
      * @return
      */
     private Boolean isEndOfForm(String xPath) {
-    	log.info("xPath for isEndOfForm check: "+xPath);
-    	return xPath.contains("endOfForm") || xPath.contains("eof");
+        log.info("xPath for isEndOfForm check: "+xPath);
+        return xPath.contains("endOfForm") || xPath.contains("eof");
     }
 
     private Mono<FormManagerParams> getPreviousMetadata(XMessage message, String formID) {
@@ -515,12 +528,12 @@ public class ODKConsumerReactive extends TransformerProvider {
 
                             // Handle image responses to a question
                             if (message.getPayload() != null) {
-                            	if(message.getPayload().getMedia() != null) {
-                                	formManagerParams.setCurrentAnswer(message.getPayload().getMedia().getUrl());
+                                if(message.getPayload().getMedia() != null) {
+                                    formManagerParams.setCurrentAnswer(message.getPayload().getMedia().getUrl());
                                 } else if(message.getPayload().getLocation() != null) {
-                                	formManagerParams.setCurrentAnswer(getLocationContentText(message.getPayload().getLocation()));
+                                    formManagerParams.setCurrentAnswer(getLocationContentText(message.getPayload().getLocation()));
                                 } else  {
-                                	formManagerParams.setCurrentAnswer(message.getPayload().getText());
+                                    formManagerParams.setCurrentAnswer(message.getPayload().getText());
                                 }
                             } else {
                                 formManagerParams.setCurrentAnswer("");
@@ -545,18 +558,18 @@ public class ODKConsumerReactive extends TransformerProvider {
      * @return
      */
     private String getLocationContentText(LocationParams location) {
-    	String text = "";
-    	text = location.getLatitude()+" "+location.getLongitude();
-    	if(location.getAddress() != null && !location.getAddress().isEmpty()) {
-    		text += " "+location.getAddress();
-    	}
-    	if(location.getName() != null && !location.getName().isEmpty()) {
-    		text += " "+location.getName();
-    	}
-    	if(location.getUrl() != null && !location.getUrl().isEmpty()) {
-    		text += " "+location.getUrl();
-    	}
-    	return text.trim();
+        String text = "";
+        text = location.getLatitude()+" "+location.getLongitude();
+        if(location.getAddress() != null && !location.getAddress().isEmpty()) {
+            text += " "+location.getAddress();
+        }
+        if(location.getName() != null && !location.getName().isEmpty()) {
+            text += " "+location.getName();
+        }
+        if(location.getUrl() != null && !location.getUrl().isEmpty()) {
+            text += " "+location.getUrl();
+        }
+        return text.trim();
     }
     
     @NotNull
@@ -569,8 +582,8 @@ public class ODKConsumerReactive extends TransformerProvider {
                     @Override
                     public void accept(Pair<Boolean, List<Question>> existingQuestionStatus) {
                         if (existingQuestionStatus.getLeft()) {
-                        	log.info("Found Question id: "+existingQuestionStatus.getRight().get(0).getId()+", xPath: "+existingQuestionStatus.getRight().get(0).getXPath());
-                        	saveAssessmentData(
+                            log.info("Found Question id: "+existingQuestionStatus.getRight().get(0).getId()+", xPath: "+existingQuestionStatus.getRight().get(0).getXPath());
+                            saveAssessmentData(
                                     existingQuestionStatus, formID, previousMeta, transformer, xMessage, null, currentXPath, validResponse).subscribe(new Consumer<Assessment>() {
                                 @Override
                                 public void accept(Assessment assessment) {
@@ -578,17 +591,17 @@ public class ODKConsumerReactive extends TransformerProvider {
                                 }
                             });
                         } else {
-                        	Question saveQuestion;
-                        	if(prevQuestion == null) {
-                        		saveQuestion = question;
-                        	} else {
-                        		saveQuestion = prevQuestion;
-                        	}
+                            Question saveQuestion;
+                            if(prevQuestion == null) {
+                                saveQuestion = question;
+                            } else {
+                                saveQuestion = prevQuestion;
+                            }
                             saveQuestion(saveQuestion).subscribe(new Consumer<Question>() {
                                 @Override
                                 public void accept(Question question) {
-                                	log.info("Question Saved Successfully, id: "+question.getId()+", xPath: "+question.getXPath());
-                                	saveAssessmentData(
+                                    log.info("Question Saved Successfully, id: "+question.getId()+", xPath: "+question.getXPath());
+                                    saveAssessmentData(
                                             existingQuestionStatus, formID, previousMeta, transformer, xMessage, question, currentXPath, validResponse).subscribe(new Consumer<Assessment>() {
                                         @Override
                                         public void accept(Assessment assessment) {
@@ -603,7 +616,7 @@ public class ODKConsumerReactive extends TransformerProvider {
     }
 
     private Mono<Pair<Boolean, List<Question>>> getPreviousQuestions(String previousPath, String formID, String formVersion) {
-    	return questionRepo
+        return questionRepo
                 .findQuestionByXPathAndFormIDAndFormVersion(previousPath, formID, formVersion)
                 .collectList()
                 .flatMap(new Function<List<Question>, Mono<Pair<Boolean, List<Question>>>>() {
@@ -639,15 +652,15 @@ public class ODKConsumerReactive extends TransformerProvider {
                 .userID(userID)
                 .build();
         try {
-        	if(question != null) {
-        		log.info("In saveAssessmentData, question id: "+question.getId()+", question xpath: "+question.getXPath());
-        	}else {
-            	log.info("In saveAssessmentData, Question empty: "+question);
+            if(question != null) {
+                log.info("In saveAssessmentData, question id: "+question.getId()+", question xpath: "+question.getXPath());
+            }else {
+                log.info("In saveAssessmentData, Question empty: "+question);
             }
-        	
-        	if(question != null && !isStartingMessage) {
-        		
-        		XMessagePayload questionPayload = menuManager.getQuestionPayloadFromXPath(question.getXPath());
+
+            if(question != null && !isStartingMessage) {
+
+                XMessagePayload questionPayload = menuManager.getQuestionPayloadFromXPath(question.getXPath());
 
                 sendEvents(xMessage, questionPayload, assessment, transformer, currentXPath, validResponse);
             }
@@ -791,7 +804,7 @@ public class ODKConsumerReactive extends TransformerProvider {
      * @return
      */
     private Flux<XMessageDAO> getLastSentXMessage(String appName, String userID) {
-    	return xMsgRepo.findFirstByAppAndUserIdAndFromIdAndMessageStateOrderByTimestampDesc(appName, userID, "admin", MessageState.SENT.name());
+        return xMsgRepo.findFirstByAppAndUserIdAndFromIdAndMessageStateOrderByTimestampDesc(appName, userID, "admin", MessageState.SENT.name());
     }
 
     private Mono<XMessage> decodeXMessage(XMessage xMessage, ServiceResponse response, String formID, Mono<Pair<Boolean, List<Question>>> updateQuestionAndAssessment) {
@@ -851,7 +864,7 @@ public class ODKConsumerReactive extends TransformerProvider {
     }
 
     public static String getFormPath(String formID) {
-    	FormsDao dao = new FormsDao(JsonDB.getInstance().getDB());
+        FormsDao dao = new FormsDao(JsonDB.getInstance().getDB());
         try{
             return dao.getFormsCursorForFormId(formID).getFormFilePath();
         } catch (NullPointerException ex){
@@ -909,6 +922,6 @@ public class ODKConsumerReactive extends TransformerProvider {
     }
     
     private String redisKeyWithPrefix(String key) {
-    	return System.getenv("ENV")+"-"+key;
+        return System.getenv("ENV")+"-"+key;
     }
 }
